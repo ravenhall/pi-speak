@@ -1,0 +1,21 @@
+{
+  "name": "pi-speak",
+  "version": "1.0.0",
+  "description": "Modular TTS extension for Pi Coding Agent",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc -w"
+  },
+  "dependencies": {
+    "@elevenlabs/elevenlabs-js": "^2.43.0",
+    "dotenv": "^16.4.5",
+    "ws": "^8.20.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "@types/ws": "^8.18.1",
+    "typescript": "^5.0.0"
+  }
+}
