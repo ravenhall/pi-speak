@@ -6,6 +6,7 @@ import { TTSProvider } from "../types.js";
 
 export class MacSayProvider implements TTSProvider {
   private audioCallback?: (audio: string) => void;
+  private errorCallback?: (error: Error) => void;
   private buffer = "";
   private synthesisQueue = Promise.resolve();
   private isShutdown = false;
@@ -35,6 +36,7 @@ export class MacSayProvider implements TTSProvider {
       .then(() => this.synthesize(text))
       .catch((error) => {
         console.error("pi-speak: macOS say synthesis failed", error);
+        this.reportError(toError(error));
       });
   }
 
@@ -42,9 +44,19 @@ export class MacSayProvider implements TTSProvider {
     this.audioCallback = callback;
   }
 
+  onError(callback: (error: Error) => void) {
+    this.errorCallback = callback;
+  }
+
   shutdown() {
     this.isShutdown = true;
     this.buffer = "";
+  }
+
+  private reportError(error: Error) {
+    if (!this.isShutdown) {
+      this.errorCallback?.(error);
+    }
   }
 
   private async synthesize(text: string) {
@@ -125,4 +137,8 @@ export class MacSayProvider implements TTSProvider {
       await rm(tempDir, { recursive: true, force: true });
     }
   }
+}
+
+function toError(error: unknown) {
+  return error instanceof Error ? error : new Error(String(error));
 }

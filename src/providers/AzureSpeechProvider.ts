@@ -88,6 +88,7 @@ const DEFAULT_AZURE_VOICE = "en-US-JennyNeural";
 // - Entra prerequisites include custom domain and Speech role assignment
 export class AzureSpeechProvider implements TTSProvider {
   private audioCallback?: (audio: string) => void;
+  private errorCallback?: (error: Error) => void;
   private buffer = "";
   private synthesisQueue = Promise.resolve();
   private isShutdown = false;
@@ -130,6 +131,7 @@ export class AzureSpeechProvider implements TTSProvider {
       .then(() => this.synthesize(text))
       .catch((error) => {
         console.error("pi-speak: Azure speech synthesis failed", error);
+        this.reportError(toError(error));
       });
   }
 
@@ -137,9 +139,19 @@ export class AzureSpeechProvider implements TTSProvider {
     this.audioCallback = callback;
   }
 
+  onError(callback: (error: Error) => void) {
+    this.errorCallback = callback;
+  }
+
   shutdown() {
     this.isShutdown = true;
     this.buffer = "";
+  }
+
+  private reportError(error: Error) {
+    if (!this.isShutdown) {
+      this.errorCallback?.(error);
+    }
   }
 
   private async synthesize(text: string) {
@@ -184,4 +196,8 @@ export class AzureSpeechProvider implements TTSProvider {
       .replaceAll('"', "&quot;")
       .replaceAll("'", "&apos;");
   }
+}
+
+function toError(error: unknown) {
+  return error instanceof Error ? error : new Error(String(error));
 }

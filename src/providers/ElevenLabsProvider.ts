@@ -9,6 +9,8 @@ interface ElevenLabsStreamMessage {
 export class ElevenLabsProvider implements TTSProvider {
   private socket: WebSocket | null = null;
   private audioCallback?: (audio: string) => void;
+  private errorCallback?: (error: Error) => void;
+  private isShutdown = false;
 
   async initialize() {
     const voiceId = process.env.ELEVENLABS_VOICE_ID;
@@ -40,14 +42,19 @@ export class ElevenLabsProvider implements TTSProvider {
 
     socket.on("error", (error) => {
       console.error("pi-speak: ElevenLabs WebSocket error", error);
+      this.reportError(error);
     });
 
     socket.on("close", (code, reason) => {
-      if (code !== 1000) {
-        console.error(
-          `pi-speak: ElevenLabs WebSocket closed unexpectedly (${code}) ${reason.toString()}`
-        );
+      if (this.isShutdown || code === 1000) {
+        return;
       }
+
+      const error = new Error(
+        `ElevenLabs WebSocket closed unexpectedly (${code}) ${reason.toString()}`
+      );
+      console.error(`pi-speak: ${error.message}`);
+      this.reportError(error);
     });
 
     await new Promise<void>((resolve, reject) => {
@@ -85,7 +92,12 @@ export class ElevenLabsProvider implements TTSProvider {
       JSON.stringify({
         text,
         try_trigger_generation: true,
-      })
+      }),
+      (error) => {
+        if (error) {
+          this.reportError(error);
+        }
+      }
     );
   }
 
@@ -98,7 +110,12 @@ export class ElevenLabsProvider implements TTSProvider {
       JSON.stringify({
         text: "",
         flush: true,
-      })
+      }),
+      (error) => {
+        if (error) {
+          this.reportError(error);
+        }
+      }
     );
   }
 
@@ -106,9 +123,20 @@ export class ElevenLabsProvider implements TTSProvider {
     this.audioCallback = callback;
   }
 
+  onError(callback: (error: Error) => void) {
+    this.errorCallback = callback;
+  }
+
   shutdown() {
+    this.isShutdown = true;
     this.socket?.close();
     this.socket = null;
+  }
+
+  private reportError(error: Error) {
+    if (!this.isShutdown) {
+      this.errorCallback?.(error);
+    }
   }
 
   private parseMessage(data: RawData): ElevenLabsStreamMessage | null {
