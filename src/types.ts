@@ -7,4 +7,4 @@ export interface TTSProvider {
   onError(callback: (error: Error) => void): void;
 }
 
-export type TTSProviderName = "elevenlabs" | "azure" | "macsay";
+export type TTSProviderName = "elevenlabs" | "azure" | "kokoro" | "macsay";

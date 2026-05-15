@@ -2,10 +2,11 @@ import "dotenv/config";
 import { spawn, ChildProcessWithoutNullStreams } from "child_process";
 import { AzureSpeechProvider } from "./providers/AzureSpeechProvider.js";
 import { ElevenLabsProvider } from "./providers/ElevenLabsProvider.js";
+import { KokoroProvider } from "./providers/KokoroProvider.js";
 import { MacSayProvider } from "./providers/MacSayProvider.js";
 import { TTSProvider, TTSProviderName } from "./types.js";
 
-const DEFAULT_PROVIDER_ORDER: TTSProviderName[] = ["elevenlabs", "azure", "macsay"];
+const DEFAULT_PROVIDER_ORDER: TTSProviderName[] = ["elevenlabs", "azure", "kokoro", "macsay"];
 
 class NoopProvider implements TTSProvider {
   async initialize() {}
@@ -266,11 +267,13 @@ function createProvider(providerName: TTSProviderName) {
       return new ElevenLabsProvider();
     case "azure":
       return new AzureSpeechProvider();
+    case "kokoro":
+      return new KokoroProvider();
     case "macsay":
       return new MacSayProvider();
   }
 }
 
 function isProviderName(value: string): value is TTSProviderName {
-  return value === "elevenlabs" || value === "azure" || value === "macsay";
+  return value === "elevenlabs" || value === "azure" || value === "kokoro" || value === "macsay";
 }
