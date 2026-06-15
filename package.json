@@ -2,8 +2,13 @@
   "name": "pi-speak",
   "version": "1.0.0",
   "description": "Modular TTS extension for Pi Coding Agent",
+  "keywords": ["pi-package"],
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
+  "files": ["dist", "package.json", "README.md", "LICENSE"],
+  "pi": {
+    "extensions": ["./dist/index.js"]
+  },
   "scripts": {
     "build": "tsc",
     "dev": "tsc -w"

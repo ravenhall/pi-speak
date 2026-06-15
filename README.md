@@ -19,6 +19,24 @@ npm install
 npm run build
 ```
 
+## Install with Pi
+
+This repo is packaged for `pi install` and exposes its extension through the
+`pi` manifest in `package.json`. Install it from git with:
+
+```bash
+pi install git:git@github.com:ravenhall/pi-speak
+```
+
+Or use a local checkout during development:
+
+```bash
+pi install /absolute/path/to/pi-speak
+```
+
+The package ships the prebuilt `dist/` entrypoint so Pi can load it directly
+after `npm install`.
+
 ## Provider Selection
 
 Providers are tried in order at startup. The default order is:
