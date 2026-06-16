@@ -4,9 +4,22 @@ import { AzureSpeechProvider } from "./providers/AzureSpeechProvider.js";
 import { ElevenLabsProvider } from "./providers/ElevenLabsProvider.js";
 import { KokoroProvider } from "./providers/KokoroProvider.js";
 import { MacSayProvider } from "./providers/MacSayProvider.js";
-import { TTSProvider, TTSProviderName } from "./types.js";
+import { TTSProvider, TTSProviderName, TTSProviderProgress } from "./types.js";
 
 const DEFAULT_PROVIDER_ORDER: TTSProviderName[] = ["elevenlabs", "azure", "kokoro", "macsay"];
+const STATUS_KEY = "pi-speak";
+const LOADING_WIDGET_KEY = "pi-speak-loading";
+
+interface PiUi {
+  setStatus?: (key: string, value?: string) => void;
+  setWidget?: (key: string, value?: string[] | unknown, options?: { placement?: string }) => void;
+  notify?: (message: string, level?: "info" | "warning" | "error") => void;
+}
+
+interface PiContext {
+  hasUI?: boolean;
+  ui?: PiUi;
+}
 
 class NoopProvider implements TTSProvider {
   async initialize() {}
@@ -27,7 +40,8 @@ class TTSRuntime {
 
   constructor(
     private readonly providerOrder: TTSProviderName[],
-    private readonly audioCallback: (audioBase64: string) => void
+    private readonly audioCallback: (audioBase64: string) => void,
+    private readonly ui: PiSpeakUi
   ) {}
 
   async initialize() {
@@ -72,7 +86,10 @@ class TTSRuntime {
       const provider = createProvider(providerName);
 
       try {
-        await provider.initialize();
+        this.ui.startProvider(providerName);
+        await provider.initialize({
+          onProgress: (progress) => this.ui.reportProgress(progress),
+        });
         provider.onAudio(this.audioCallback);
         provider.onError((error) => {
           void this.failover(error);
@@ -80,15 +97,17 @@ class TTSRuntime {
 
         this.provider = provider;
         this.providerIndex = index;
-        console.log(`pi-speak: Provider initialized (${providerName}).`);
+        this.ui.providerReady(providerName);
         this.replayQueuedInput();
         return;
       } catch (error) {
         provider.shutdown();
+        this.ui.providerFailed(providerName, error);
         console.error(`pi-speak: Failed to initialize provider (${providerName})`, error);
       }
     }
 
+    this.ui.noProvider();
     console.error("pi-speak: No TTS providers initialized; audio output disabled.");
     this.provider = new NoopProvider();
     this.providerIndex = this.providerOrder.length;
@@ -101,6 +120,7 @@ class TTSRuntime {
 
     this.switchingProvider = true;
     console.error("pi-speak: Active TTS provider failed; attempting fallback", error);
+    this.ui.providerFailed(this.providerOrder[this.providerIndex], error);
 
     const failedProvider = this.provider;
     failedProvider.shutdown();
@@ -131,9 +151,104 @@ class TTSRuntime {
   }
 }
 
+class PiSpeakUi {
+  private ctx?: PiContext;
+  private status: string | undefined;
+  private widgetLines: string[] | undefined;
+
+  setContext(ctx: PiContext | undefined) {
+    this.ctx = ctx;
+    this.renderStatus();
+    this.renderWidget();
+  }
+
+  startProvider(provider: TTSProviderName) {
+    this.setStatus(`initializing ${provider}`);
+    this.setWidget([`Initializing ${provider}...`]);
+  }
+
+  reportProgress(progress: TTSProviderProgress) {
+    const suffix = typeof progress.percent === "number" ? `${progress.percent}%` : progress.message;
+    this.setStatus(`loading ${progress.provider} ${suffix}`);
+    this.setWidget([progress.message]);
+  }
+
+  providerReady(provider: TTSProviderName) {
+    this.setStatus(`ready (${provider})`);
+    this.setWidget(undefined);
+  }
+
+  providerFailed(provider: TTSProviderName | undefined, error: unknown) {
+    const providerName = provider ?? "provider";
+    const message = error instanceof Error ? error.message : String(error);
+    this.setStatus(`${providerName} failed`);
+    this.setWidget(undefined);
+    this.notify(`pi-speak: ${providerName} failed: ${message}`, "warning");
+  }
+
+  noProvider() {
+    this.setStatus("audio disabled");
+    this.setWidget(undefined);
+    this.notify("pi-speak: no TTS providers initialized; audio output disabled.", "error");
+  }
+
+  clear() {
+    this.setStatus(undefined);
+    this.setWidget(undefined);
+  }
+
+  private get ui() {
+    if (this.ctx?.hasUI === false || !this.ctx?.ui) {
+      return undefined;
+    }
+
+    return this.ctx.ui;
+  }
+
+  private setStatus(value: string | undefined) {
+    this.status = value;
+    this.renderStatus();
+  }
+
+  private renderStatus() {
+    try {
+      this.ui?.setStatus?.(STATUS_KEY, this.status);
+    } catch (error) {
+      console.error("pi-speak: Failed to update status UI", error);
+    }
+  }
+
+  private setWidget(lines: string[] | undefined) {
+    this.widgetLines = lines;
+    this.renderWidget();
+  }
+
+  private renderWidget() {
+    try {
+      this.ui?.setWidget?.(LOADING_WIDGET_KEY, this.widgetLines, { placement: "belowEditor" });
+    } catch (error) {
+      console.error("pi-speak: Failed to update loading UI", error);
+    }
+  }
+
+  private notify(message: string, level: "info" | "warning" | "error") {
+    try {
+      this.ui?.notify?.(message, level);
+    } catch (error) {
+      console.error("pi-speak: Failed to show notification", error);
+    }
+  }
+}
+
 export default async function(agent: any) {
   let player: ChildProcessWithoutNullStreams | null = null;
   let shuttingDown = false;
+  const ui = new PiSpeakUi();
+  ui.setContext(agent as PiContext);
+
+  agent.on?.("session_start", (_event: unknown, ctx: PiContext) => {
+    ui.setContext(ctx);
+  });
 
   const stopPlayer = (signal: NodeJS.Signals = "SIGKILL") => {
     const currentPlayer = player;
@@ -211,7 +326,7 @@ export default async function(agent: any) {
     });
   };
 
-  const tts = new TTSRuntime(getProviderOrder(), writeAudio);
+  const tts = new TTSRuntime(getProviderOrder(), writeAudio, ui);
   await tts.initialize();
 
   const shutdown = () => {
@@ -221,6 +336,7 @@ export default async function(agent: any) {
 
     shuttingDown = true;
     tts.shutdown();
+    ui.clear();
     stopPlayer("SIGTERM");
   };
 

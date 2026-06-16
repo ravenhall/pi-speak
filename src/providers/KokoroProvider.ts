@@ -1,4 +1,4 @@
-import { TTSProvider } from "../types.js";
+import { TTSProvider, TTSProviderInitializeOptions } from "../types.js";
 
 const DEFAULT_MODEL_ID = "onnx-community/Kokoro-82M-v1.0-ONNX";
 const DEFAULT_DTYPE = "q8";
@@ -44,7 +44,7 @@ export class KokoroProvider implements TTSProvider {
   private voice = DEFAULT_VOICE as KokoroVoice;
   private speed = DEFAULT_SPEED;
 
-  async initialize() {
+  async initialize(options: TTSProviderInitializeOptions = {}) {
     const modelId = process.env.KOKORO_MODEL_ID || DEFAULT_MODEL_ID;
     const dtype = parseDtype(process.env.KOKORO_DTYPE);
     const device = parseDevice(process.env.KOKORO_DEVICE);
@@ -56,7 +56,12 @@ export class KokoroProvider implements TTSProvider {
       device,
       progress_callback: (progress) => {
         if (progress.status === "progress" && typeof progress.progress === "number") {
-          console.log(`pi-speak: Kokoro model loading ${Math.round(progress.progress)}%`);
+          const percent = Math.round(progress.progress);
+          options.onProgress?.({
+            provider: "kokoro",
+            message: `Kokoro model loading ${percent}%`,
+            percent,
+          });
         }
       },
     });

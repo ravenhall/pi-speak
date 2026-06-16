@@ -17,7 +17,7 @@ class KokoroProvider {
     isShutdown = false;
     voice = DEFAULT_VOICE;
     speed = DEFAULT_SPEED;
-    async initialize() {
+    async initialize(options = {}) {
         const modelId = process.env.KOKORO_MODEL_ID || DEFAULT_MODEL_ID;
         const dtype = parseDtype(process.env.KOKORO_DTYPE);
         const device = parseDevice(process.env.KOKORO_DEVICE);
@@ -28,7 +28,12 @@ class KokoroProvider {
             device,
             progress_callback: (progress) => {
                 if (progress.status === "progress" && typeof progress.progress === "number") {
-                    console.log(`pi-speak: Kokoro model loading ${Math.round(progress.progress)}%`);
+                    const percent = Math.round(progress.progress);
+                    options.onProgress?.({
+                        provider: "kokoro",
+                        message: `Kokoro model loading ${percent}%`,
+                        percent,
+                    });
                 }
             },
         });

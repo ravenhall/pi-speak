@@ -1,4 +1,4 @@
-import { TTSProvider } from "../types.js";
+import { TTSProvider, TTSProviderInitializeOptions } from "../types.js";
 export declare class KokoroProvider implements TTSProvider {
     private tts;
     private audioCallback?;
@@ -8,7 +8,7 @@ export declare class KokoroProvider implements TTSProvider {
     private isShutdown;
     private voice;
     private speed;
-    initialize(): Promise<void>;
+    initialize(options?: TTSProviderInitializeOptions): Promise<void>;
     streamText(text: string): void;
     flush(): void;
     onAudio(callback: (audioBase64: string) => void): void;

@@ -8,6 +8,8 @@ const ElevenLabsProvider_js_1 = require("./providers/ElevenLabsProvider.js");
 const KokoroProvider_js_1 = require("./providers/KokoroProvider.js");
 const MacSayProvider_js_1 = require("./providers/MacSayProvider.js");
 const DEFAULT_PROVIDER_ORDER = ["elevenlabs", "azure", "kokoro", "macsay"];
+const STATUS_KEY = "pi-speak";
+const LOADING_WIDGET_KEY = "pi-speak-loading";
 class NoopProvider {
     async initialize() { }
     streamText(_) { }
@@ -19,15 +21,17 @@ class NoopProvider {
 class TTSRuntime {
     providerOrder;
     audioCallback;
+    ui;
     provider = new NoopProvider();
     providerIndex = -1;
     switchingProvider = false;
     queuedText = "";
     queuedFlush = false;
     isShutdown = false;
-    constructor(providerOrder, audioCallback) {
+    constructor(providerOrder, audioCallback, ui) {
         this.providerOrder = providerOrder;
         this.audioCallback = audioCallback;
+        this.ui = ui;
     }
     async initialize() {
         await this.activateProvider(0);
@@ -62,22 +66,27 @@ class TTSRuntime {
             const providerName = this.providerOrder[index];
             const provider = createProvider(providerName);
             try {
-                await provider.initialize();
+                this.ui.startProvider(providerName);
+                await provider.initialize({
+                    onProgress: (progress) => this.ui.reportProgress(progress),
+                });
                 provider.onAudio(this.audioCallback);
                 provider.onError((error) => {
                     void this.failover(error);
                 });
                 this.provider = provider;
                 this.providerIndex = index;
-                console.log(`pi-speak: Provider initialized (${providerName}).`);
+                this.ui.providerReady(providerName);
                 this.replayQueuedInput();
                 return;
             }
             catch (error) {
                 provider.shutdown();
+                this.ui.providerFailed(providerName, error);
                 console.error(`pi-speak: Failed to initialize provider (${providerName})`, error);
             }
         }
+        this.ui.noProvider();
         console.error("pi-speak: No TTS providers initialized; audio output disabled.");
         this.provider = new NoopProvider();
         this.providerIndex = this.providerOrder.length;
@@ -88,6 +97,7 @@ class TTSRuntime {
         }
         this.switchingProvider = true;
         console.error("pi-speak: Active TTS provider failed; attempting fallback", error);
+        this.ui.providerFailed(this.providerOrder[this.providerIndex], error);
         const failedProvider = this.provider;
         failedProvider.shutdown();
         this.provider = new NoopProvider();
@@ -111,9 +121,91 @@ class TTSRuntime {
         }
     }
 }
+class PiSpeakUi {
+    ctx;
+    status;
+    widgetLines;
+    setContext(ctx) {
+        this.ctx = ctx;
+        this.renderStatus();
+        this.renderWidget();
+    }
+    startProvider(provider) {
+        this.setStatus(`initializing ${provider}`);
+        this.setWidget([`Initializing ${provider}...`]);
+    }
+    reportProgress(progress) {
+        const suffix = typeof progress.percent === "number" ? `${progress.percent}%` : progress.message;
+        this.setStatus(`loading ${progress.provider} ${suffix}`);
+        this.setWidget([progress.message]);
+    }
+    providerReady(provider) {
+        this.setStatus(`ready (${provider})`);
+        this.setWidget(undefined);
+    }
+    providerFailed(provider, error) {
+        const providerName = provider ?? "provider";
+        const message = error instanceof Error ? error.message : String(error);
+        this.setStatus(`${providerName} failed`);
+        this.setWidget(undefined);
+        this.notify(`pi-speak: ${providerName} failed: ${message}`, "warning");
+    }
+    noProvider() {
+        this.setStatus("audio disabled");
+        this.setWidget(undefined);
+        this.notify("pi-speak: no TTS providers initialized; audio output disabled.", "error");
+    }
+    clear() {
+        this.setStatus(undefined);
+        this.setWidget(undefined);
+    }
+    get ui() {
+        if (this.ctx?.hasUI === false || !this.ctx?.ui) {
+            return undefined;
+        }
+        return this.ctx.ui;
+    }
+    setStatus(value) {
+        this.status = value;
+        this.renderStatus();
+    }
+    renderStatus() {
+        try {
+            this.ui?.setStatus?.(STATUS_KEY, this.status);
+        }
+        catch (error) {
+            console.error("pi-speak: Failed to update status UI", error);
+        }
+    }
+    setWidget(lines) {
+        this.widgetLines = lines;
+        this.renderWidget();
+    }
+    renderWidget() {
+        try {
+            this.ui?.setWidget?.(LOADING_WIDGET_KEY, this.widgetLines, { placement: "belowEditor" });
+        }
+        catch (error) {
+            console.error("pi-speak: Failed to update loading UI", error);
+        }
+    }
+    notify(message, level) {
+        try {
+            this.ui?.notify?.(message, level);
+        }
+        catch (error) {
+            console.error("pi-speak: Failed to show notification", error);
+        }
+    }
+}
 async function default_1(agent) {
     let player = null;
     let shuttingDown = false;
+    const ui = new PiSpeakUi();
+    ui.setContext(agent);
+    agent.on?.("session_start", (_event, ctx) => {
+        ui.setContext(ctx);
+    });
     const stopPlayer = (signal = "SIGKILL") => {
         const currentPlayer = player;
         player = null;
@@ -176,7 +268,7 @@ async function default_1(agent) {
             }
         });
     };
-    const tts = new TTSRuntime(getProviderOrder(), writeAudio);
+    const tts = new TTSRuntime(getProviderOrder(), writeAudio, ui);
     await tts.initialize();
     const shutdown = () => {
         if (shuttingDown) {
@@ -184,6 +276,7 @@ async function default_1(agent) {
         }
         shuttingDown = true;
         tts.shutdown();
+        ui.clear();
         stopPlayer("SIGTERM");
     };
     process.once("beforeExit", shutdown);
