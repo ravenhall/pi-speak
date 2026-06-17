@@ -6,7 +6,21 @@ import { KokoroProvider } from "./providers/KokoroProvider.js";
 import { MacSayProvider } from "./providers/MacSayProvider.js";
 import { TTSProvider, TTSProviderName, TTSProviderProgress } from "./types.js";
 
-const DEFAULT_PROVIDER_ORDER: TTSProviderName[] = ["elevenlabs", "azure", "kokoro", "macsay"];
+const AUTO_FALLBACK_PROVIDER: TTSProviderName = "macsay";
+const ELEVENLABS_ENV_KEYS = ["ELEVENLABS_API_KEY", "ELEVENLABS_VOICE_ID"];
+const AZURE_ENV_KEYS = [
+  "AZURE_SPEECH_KEY",
+  "AZURE_SPEECH_REGION",
+  "AZURE_SPEECH_ENDPOINT",
+  "AZURE_SPEECH_VOICE",
+];
+const KOKORO_ENV_KEYS = [
+  "KOKORO_MODEL_ID",
+  "KOKORO_DTYPE",
+  "KOKORO_DEVICE",
+  "KOKORO_VOICE",
+  "KOKORO_SPEED",
+];
 const STATUS_KEY = "pi-speak";
 const LOADING_WIDGET_KEY = "pi-speak-loading";
 
@@ -103,7 +117,9 @@ class TTSRuntime {
       } catch (error) {
         provider.shutdown();
         this.ui.providerFailed(providerName, error);
-        console.error(`pi-speak: Failed to initialize provider (${providerName})`, error);
+        console.warn(
+          `pi-speak: Provider ${providerName} unavailable; trying fallback: ${errorMessage(error)}`
+        );
       }
     }
 
@@ -359,7 +375,7 @@ function getProviderOrder(): TTSProviderName[] {
   const configuredOrder = process.env.TTS_PROVIDER_ORDER ?? process.env.TTS_PROVIDER;
 
   if (!configuredOrder) {
-    return DEFAULT_PROVIDER_ORDER;
+    return getAutomaticProviderOrder();
   }
 
   const seen = new Set<TTSProviderName>();
@@ -374,7 +390,86 @@ function getProviderOrder(): TTSProviderName[] {
     }
   }
 
-  return orderedProviders.length > 0 ? orderedProviders : DEFAULT_PROVIDER_ORDER;
+  return orderedProviders.length > 0 ? orderedProviders : getAutomaticProviderOrder();
+}
+
+function getAutomaticProviderOrder(): TTSProviderName[] {
+  const providerOrder: TTSProviderName[] = [];
+
+  if (hasElevenLabsConfig()) {
+    providerOrder.push("elevenlabs");
+  } else {
+    warnSkippedPartialProvider(
+      "elevenlabs",
+      ELEVENLABS_ENV_KEYS,
+      getMissingEnv(ELEVENLABS_ENV_KEYS)
+    );
+  }
+
+  if (hasAzureConfig()) {
+    providerOrder.push("azure");
+  } else {
+    warnSkippedPartialProvider("azure", AZURE_ENV_KEYS, getMissingAzureConfig());
+  }
+
+  if (hasAnyEnv(KOKORO_ENV_KEYS)) {
+    providerOrder.push("kokoro");
+  }
+
+  if (process.platform === "darwin") {
+    providerOrder.push(AUTO_FALLBACK_PROVIDER);
+  }
+
+  return providerOrder;
+}
+
+function hasElevenLabsConfig() {
+  return Boolean(process.env.ELEVENLABS_API_KEY && process.env.ELEVENLABS_VOICE_ID);
+}
+
+function hasAzureConfig() {
+  return Boolean(
+    process.env.AZURE_SPEECH_KEY &&
+      (process.env.AZURE_SPEECH_REGION || process.env.AZURE_SPEECH_ENDPOINT)
+  );
+}
+
+function hasAnyEnv(keys: string[]) {
+  return keys.some((key) => Boolean(process.env[key]));
+}
+
+function getMissingEnv(keys: string[]) {
+  return keys.filter((key) => !process.env[key]);
+}
+
+function getMissingAzureConfig() {
+  const missing: string[] = [];
+
+  if (!process.env.AZURE_SPEECH_KEY) {
+    missing.push("AZURE_SPEECH_KEY");
+  }
+
+  if (!process.env.AZURE_SPEECH_REGION && !process.env.AZURE_SPEECH_ENDPOINT) {
+    missing.push("AZURE_SPEECH_REGION or AZURE_SPEECH_ENDPOINT");
+  }
+
+  return missing;
+}
+
+function warnSkippedPartialProvider(
+  provider: TTSProviderName,
+  envKeys: string[],
+  missing: string[]
+) {
+  if (!hasAnyEnv(envKeys) || missing.length === 0) {
+    return;
+  }
+
+  console.warn(`pi-speak: Skipping ${provider}; missing ${missing.join(", ")}.`);
+}
+
+function errorMessage(error: unknown) {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function createProvider(providerName: TTSProviderName) {

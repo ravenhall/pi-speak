@@ -13,9 +13,8 @@ class MacSayProvider {
     isShutdown = false;
     voice = process.env.MAC_SAY_VOICE;
     async initialize() {
-        const pcm = await this.renderPcm("pi-speak");
-        if (pcm.length === 0) {
-            throw new Error("macOS say produced empty audio output");
+        if (process.platform !== "darwin") {
+            throw new Error("macOS say is only available on macOS");
         }
     }
     streamText(text) {

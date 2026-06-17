@@ -32,8 +32,6 @@ interface KokoroTTSConstructor {
   ): Promise<KokoroTTSInstance>;
 }
 
-const { KokoroTTS } = require("kokoro-js") as { KokoroTTS: KokoroTTSConstructor };
-
 export class KokoroProvider implements TTSProvider {
   private tts: KokoroTTSInstance | null = null;
   private audioCallback?: (audio: string) => void;
@@ -48,6 +46,7 @@ export class KokoroProvider implements TTSProvider {
     const modelId = process.env.KOKORO_MODEL_ID || DEFAULT_MODEL_ID;
     const dtype = parseDtype(process.env.KOKORO_DTYPE);
     const device = parseDevice(process.env.KOKORO_DEVICE);
+    const KokoroTTS = loadKokoroTTS();
 
     this.voice = (process.env.KOKORO_VOICE || DEFAULT_VOICE) as KokoroVoice;
     this.speed = parsePositiveNumber(process.env.KOKORO_SPEED, DEFAULT_SPEED);
@@ -146,6 +145,11 @@ function parseDtype(value: string | undefined): KokoroDtype {
     default:
       throw new Error(`Invalid KOKORO_DTYPE: ${value}`);
   }
+}
+
+function loadKokoroTTS() {
+  const { KokoroTTS } = require("kokoro-js") as { KokoroTTS: KokoroTTSConstructor };
+  return KokoroTTS;
 }
 
 function parseDevice(value: string | undefined): KokoroDevice {

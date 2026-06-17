@@ -39,13 +39,20 @@ after `npm install`.
 
 ## Provider Selection
 
-Providers are tried in order at startup. The default order is:
+When no provider is explicitly selected, `pi-speak` uses automatic provider
+selection:
 
 ```text
-elevenlabs,azure,kokoro,macsay
+configured cloud providers, configured Kokoro, macsay on macOS
 ```
 
-Override the order with either:
+ElevenLabs and Azure are considered configured only when their required env vars
+are present. Partial cloud configuration is skipped with a short warning instead
+of initializing the provider. Kokoro is considered configured when any
+`KOKORO_*` env var is set. On macOS, the automatic fallback is `say`, which
+avoids credential errors and large model loads during ordinary startup.
+
+Override automatic selection with either:
 
 ```bash
 TTS_PROVIDER_ORDER=azure,kokoro,macsay
@@ -64,7 +71,7 @@ is starting is queued and replayed once the new provider is active.
 
 | Variable | Provider | Required | Description |
 | --- | --- | --- | --- |
-| `TTS_PROVIDER_ORDER` | all | no | Comma-separated provider order, for example `elevenlabs,azure,kokoro,macsay`. |
+| `TTS_PROVIDER_ORDER` | all | no | Explicit comma-separated provider order, for example `elevenlabs,azure,kokoro,macsay`. |
 | `TTS_PROVIDER` | all | no | Single provider or comma-separated fallback order if `TTS_PROVIDER_ORDER` is unset. |
 | `ELEVENLABS_API_KEY` | ElevenLabs | yes | ElevenLabs API key. |
 | `ELEVENLABS_VOICE_ID` | ElevenLabs | yes | Voice ID used for the `stream-input` WebSocket endpoint. |
@@ -101,13 +108,14 @@ as text arrives.
 Azure Speech uses the REST text-to-speech endpoint. It buffers deltas and
 synthesizes once `agent:message:end` triggers `flush()`.
 
-Kokoro is the recommended high-quality local TTS provider. It uses `kokoro-js`
-directly in Node, downloads model files through Transformers.js on first use,
-buffers deltas, and synthesizes once `agent:message:end` triggers `flush()`.
+Kokoro is the high-quality local TTS provider. Opt into it with
+`TTS_PROVIDER=kokoro,macsay` or by setting a `KOKORO_*` env var. It uses
+`kokoro-js` directly in Node, downloads model files through Transformers.js on
+first use, buffers deltas, and synthesizes once `agent:message:end` triggers
+`flush()`.
 
 macOS `say` is a local fallback. It renders a temporary WAVE file, extracts the
-PCM data chunk, and sends that through the same playback path. Initialization
-fails if `say` produces empty audio, allowing the fallback chain to continue.
+PCM data chunk, and sends that through the same playback path.
 
 STT, VAD, and punctuation are intentionally out of scope for this plugin. Those
 features should live in a separate speech-input plugin.

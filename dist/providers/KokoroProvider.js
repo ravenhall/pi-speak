@@ -7,7 +7,6 @@ const DEFAULT_DEVICE = "cpu";
 const DEFAULT_VOICE = "af_heart";
 const DEFAULT_SPEED = 1;
 const OUTPUT_SAMPLE_RATE = 24000;
-const { KokoroTTS } = require("kokoro-js");
 class KokoroProvider {
     tts = null;
     audioCallback;
@@ -21,6 +20,7 @@ class KokoroProvider {
         const modelId = process.env.KOKORO_MODEL_ID || DEFAULT_MODEL_ID;
         const dtype = parseDtype(process.env.KOKORO_DTYPE);
         const device = parseDevice(process.env.KOKORO_DEVICE);
+        const KokoroTTS = loadKokoroTTS();
         this.voice = (process.env.KOKORO_VOICE || DEFAULT_VOICE);
         this.speed = parsePositiveNumber(process.env.KOKORO_SPEED, DEFAULT_SPEED);
         this.tts = await KokoroTTS.from_pretrained(modelId, {
@@ -105,6 +105,10 @@ function parseDtype(value) {
         default:
             throw new Error(`Invalid KOKORO_DTYPE: ${value}`);
     }
+}
+function loadKokoroTTS() {
+    const { KokoroTTS } = require("kokoro-js");
+    return KokoroTTS;
 }
 function parseDevice(value) {
     switch (value) {
