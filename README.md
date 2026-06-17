@@ -67,6 +67,20 @@ If the active provider fails at runtime, `pi-speak` attempts to initialize the
 next provider in the configured order. Text received while the fallback provider
 is starting is queued and replayed once the new provider is active.
 
+## Muting
+
+Press `alt+m` to toggle speech output, or run:
+
+```text
+/speak-mute
+```
+
+Muting stops any active playback and suppresses new speech until it is toggled
+back on. When the extension loads, Pi shows these controls in a separate
+`pi-speak extension controls` startup widget above the editor, after Pi's
+built-in startup help. The listed command and shortcut are labeled as `pi-speak`
+controls so they are visually distinct from Pi's built-in commands.
+
 ## Environment
 
 | Variable | Provider | Required | Description |

@@ -22,8 +22,14 @@ const KOKORO_ENV_KEYS = [
     "KOKORO_VOICE",
     "KOKORO_SPEED",
 ];
+const MUTE_SHORTCUT = "alt+m";
 const STATUS_KEY = "pi-speak";
-const LOADING_WIDGET_KEY = "pi-speak-loading";
+const WIDGET_KEY = "pi-speak-controls";
+const CONTROL_WIDGET_LINES = [
+    "pi-speak extension controls",
+    "  pi-speak command: /speak-mute - mute/unmute",
+    `  pi-speak shortcut: ${MUTE_SHORTCUT} - mute/unmute`,
+];
 class NoopProvider {
     async initialize() { }
     streamText(_) { }
@@ -42,6 +48,7 @@ class TTSRuntime {
     queuedText = "";
     queuedFlush = false;
     isShutdown = false;
+    isMuted = false;
     constructor(providerOrder, audioCallback, ui) {
         this.providerOrder = providerOrder;
         this.audioCallback = audioCallback;
@@ -51,7 +58,7 @@ class TTSRuntime {
         await this.activateProvider(0);
     }
     streamText(text) {
-        if (this.isShutdown || !text) {
+        if (this.isShutdown || this.isMuted || !text) {
             return;
         }
         if (this.switchingProvider) {
@@ -61,7 +68,7 @@ class TTSRuntime {
         this.provider.streamText(text);
     }
     flush() {
-        if (this.isShutdown) {
+        if (this.isShutdown || this.isMuted) {
             return;
         }
         if (this.switchingProvider) {
@@ -74,6 +81,19 @@ class TTSRuntime {
         this.isShutdown = true;
         this.provider.shutdown();
         this.provider = new NoopProvider();
+    }
+    setMuted(isMuted) {
+        if (this.isShutdown || this.isMuted === isMuted) {
+            return;
+        }
+        this.isMuted = isMuted;
+        this.queuedText = "";
+        this.queuedFlush = false;
+        this.ui.setMuted(isMuted, this.providerOrder[this.providerIndex]);
+    }
+    toggleMuted() {
+        this.setMuted(!this.isMuted);
+        return this.isMuted;
     }
     async activateProvider(startIndex) {
         for (let index = startIndex; index < this.providerOrder.length; index += 1) {
@@ -90,7 +110,12 @@ class TTSRuntime {
                 });
                 this.provider = provider;
                 this.providerIndex = index;
-                this.ui.providerReady(providerName);
+                if (this.isMuted) {
+                    this.ui.setMuted(true, providerName);
+                }
+                else {
+                    this.ui.providerReady(providerName);
+                }
                 this.replayQueuedInput();
                 return;
             }
@@ -155,7 +180,20 @@ class PiSpeakUi {
     }
     providerReady(provider) {
         this.setStatus(`ready (${provider})`);
-        this.setWidget(undefined);
+        this.setWidget(CONTROL_WIDGET_LINES);
+    }
+    setMuted(isMuted, provider) {
+        if (isMuted) {
+            this.setStatus(provider ? `muted (${provider})` : "muted");
+            this.setWidget(CONTROL_WIDGET_LINES);
+            return;
+        }
+        if (provider) {
+            this.providerReady(provider);
+            return;
+        }
+        this.setStatus(undefined);
+        this.setWidget(CONTROL_WIDGET_LINES);
     }
     providerFailed(provider, error) {
         const providerName = provider ?? "provider";
@@ -197,7 +235,7 @@ class PiSpeakUi {
     }
     renderWidget() {
         try {
-            this.ui?.setWidget?.(LOADING_WIDGET_KEY, this.widgetLines, { placement: "belowEditor" });
+            this.ui?.setWidget?.(WIDGET_KEY, this.widgetLines, { placement: "aboveEditor" });
         }
         catch (error) {
             console.error("pi-speak: Failed to update loading UI", error);
@@ -284,6 +322,25 @@ async function default_1(agent) {
     };
     const tts = new TTSRuntime(getProviderOrder(), writeAudio, ui);
     await tts.initialize();
+    const toggleMute = (ctx) => {
+        const muted = tts.toggleMuted();
+        stopPlayer();
+        const message = muted ? "pi-speak muted" : "pi-speak unmuted";
+        ui.setContext(ctx);
+        ui.notify(message, "info");
+    };
+    agent.registerCommand?.("speak-mute", {
+        description: "Toggle pi-speak audio output",
+        handler: (_args, ctx) => {
+            toggleMute(ctx);
+        },
+    });
+    agent.registerShortcut?.(MUTE_SHORTCUT, {
+        description: "Toggle pi-speak mute",
+        handler: (ctx) => {
+            toggleMute(ctx);
+        },
+    });
     const shutdown = () => {
         if (shuttingDown) {
             return;
