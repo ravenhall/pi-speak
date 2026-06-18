@@ -8,9 +8,15 @@ interface ElevenLabsStreamMessage {
 
 export class ElevenLabsProvider implements TTSProvider {
   private socket: WebSocket | null = null;
+  private openingSocket: Promise<void> | null = null;
   private audioCallback?: (audio: string) => void;
   private errorCallback?: (error: Error) => void;
   private isShutdown = false;
+  private apiKey: string | undefined;
+  private streamUrl: string | undefined;
+  private pendingText = "";
+  private pendingFlush = false;
+  private expectedClose = false;
 
   async initialize() {
     const voiceId = process.env.ELEVENLABS_VOICE_ID;
@@ -31,92 +37,28 @@ export class ElevenLabsProvider implements TTSProvider {
     });
 
     const url = `wss://api.elevenlabs.io/v1/text-to-speech/${voiceId}/stream-input?${params.toString()}`;
-    const socket = new WebSocket(url);
-
-    socket.on("message", (data) => {
-      const message = this.parseMessage(data);
-      if (message?.audio) {
-        this.audioCallback?.(message.audio);
-      }
-    });
-
-    socket.on("error", (error) => {
-      console.error("pi-speak: ElevenLabs WebSocket error", error);
-      this.reportError(error);
-    });
-
-    socket.on("close", (code, reason) => {
-      if (this.isShutdown || code === 1000) {
-        return;
-      }
-
-      const error = new Error(
-        `ElevenLabs WebSocket closed unexpectedly (${code}) ${reason.toString()}`
-      );
-      console.error(`pi-speak: ${error.message}`);
-      this.reportError(error);
-    });
-
-    await new Promise<void>((resolve, reject) => {
-      const handleOpen = () => {
-        socket.send(
-          JSON.stringify({
-            text: " ",
-            xi_api_key: apiKey,
-            voice_settings: {
-              stability: 0.5,
-              similarity_boost: 0.8,
-            },
-          })
-        );
-        resolve();
-      };
-
-      const handleError = (error: Error) => {
-        reject(error);
-      };
-
-      socket.once("open", handleOpen);
-      socket.once("error", handleError);
-    });
-
-    this.socket = socket;
+    this.apiKey = apiKey;
+    this.streamUrl = url;
   }
 
   streamText(text: string) {
-    if (!text || this.socket?.readyState !== WebSocket.OPEN) {
+    if (!text || this.isShutdown) {
       return;
     }
 
-    this.socket.send(
-      JSON.stringify({
-        text,
-        try_trigger_generation: true,
-      }),
-      (error) => {
-        if (error) {
-          this.reportError(error);
-        }
-      }
-    );
+    this.pendingText += text;
+    this.ensureSocket();
+    this.drainPendingInput();
   }
 
   flush() {
-    if (this.socket?.readyState !== WebSocket.OPEN) {
+    if (this.isShutdown) {
       return;
     }
 
-    this.socket.send(
-      JSON.stringify({
-        text: "",
-        flush: true,
-      }),
-      (error) => {
-        if (error) {
-          this.reportError(error);
-        }
-      }
-    );
+    this.pendingFlush = true;
+    this.ensureSocket();
+    this.drainPendingInput();
   }
 
   onAudio(callback: (audio: string) => void) {
@@ -129,8 +71,150 @@ export class ElevenLabsProvider implements TTSProvider {
 
   shutdown() {
     this.isShutdown = true;
+    this.expectedClose = true;
     this.socket?.close();
     this.socket = null;
+    this.openingSocket = null;
+    this.pendingText = "";
+    this.pendingFlush = false;
+  }
+
+  private ensureSocket() {
+    if (this.isShutdown || this.socket?.readyState === WebSocket.OPEN || this.openingSocket) {
+      return;
+    }
+
+    if (!this.streamUrl || !this.apiKey) {
+      this.reportError(new Error("ElevenLabs provider was not initialized"));
+      return;
+    }
+
+    this.expectedClose = false;
+    const socket = new WebSocket(this.streamUrl);
+    this.socket = socket;
+
+    socket.on("message", (data) => {
+      const message = this.parseMessage(data);
+      if (message?.audio) {
+        this.audioCallback?.(message.audio);
+      }
+
+      if (message?.isFinal) {
+        this.expectedClose = true;
+        socket.close();
+      }
+    });
+
+    socket.on("error", (error) => {
+      console.error("pi-speak: ElevenLabs WebSocket error", error);
+      this.reportError(error);
+    });
+
+    socket.on("close", (code, reason) => {
+      if (this.socket === socket) {
+        this.socket = null;
+      }
+
+      this.openingSocket = null;
+
+      if (this.isShutdown || this.expectedClose || code === 1000) {
+        this.expectedClose = false;
+        return;
+      }
+
+      const error = new Error(
+        `ElevenLabs WebSocket closed unexpectedly (${code}) ${reason.toString()}`
+      );
+      console.error(`pi-speak: ${error.message}`);
+      this.reportError(error);
+    });
+
+    this.openingSocket = new Promise<void>((resolve, reject) => {
+      const handleOpen = () => {
+        socket.send(
+          JSON.stringify({
+            text: " ",
+            xi_api_key: this.apiKey,
+            voice_settings: {
+              stability: 0.5,
+              similarity_boost: 0.8,
+            },
+          }),
+          (error) => {
+            if (error) {
+              reject(error);
+              return;
+            }
+
+            resolve();
+          }
+        );
+      };
+
+      const handleError = (error: Error) => {
+        reject(error);
+      };
+
+      socket.once("open", handleOpen);
+      socket.once("error", handleError);
+    });
+
+    this.openingSocket
+      .then(() => {
+        if (this.socket === socket) {
+          this.openingSocket = null;
+          this.drainPendingInput();
+        }
+      })
+      .catch((error) => {
+        if (this.socket === socket) {
+          this.socket = null;
+        }
+
+        this.openingSocket = null;
+        socket.close();
+        this.reportError(toError(error));
+      }
+    );
+  }
+
+  private drainPendingInput() {
+    if (this.socket?.readyState !== WebSocket.OPEN) {
+      return;
+    }
+
+    const text = this.pendingText;
+    const shouldFlush = this.pendingFlush;
+    this.pendingText = "";
+    this.pendingFlush = false;
+
+    if (text) {
+      this.socket.send(
+        JSON.stringify({
+          text,
+          try_trigger_generation: true,
+        }),
+        (error) => {
+          if (error) {
+            this.reportError(error);
+          }
+        }
+      );
+    }
+
+    if (shouldFlush) {
+      this.socket.send(
+        JSON.stringify({
+          text: "",
+          flush: true,
+        }),
+        (error) => {
+          if (error) {
+            this.reportError(error);
+          }
+        }
+      );
+    }
   }
 
   private reportError(error: Error) {
@@ -156,4 +240,8 @@ export class ElevenLabsProvider implements TTSProvider {
       return null;
     }
   }
+}
+
+function toError(error: unknown) {
+  return error instanceof Error ? error : new Error(String(error));
 }

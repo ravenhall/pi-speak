@@ -116,8 +116,9 @@ ffplay -f s16le -ar 24000 -ac 1 -nodisp -autoexit -probesize 32 -flags low_delay
 
 ## Provider Notes
 
-ElevenLabs uses the direct `stream-input` WebSocket protocol and streams audio
-as text arrives.
+ElevenLabs validates its required config at startup, then opens the direct
+`stream-input` WebSocket only when text arrives. It streams audio as text
+arrives and closes the idle stream after each flushed response.
 
 Azure Speech uses the REST text-to-speech endpoint. It buffers deltas and
 synthesizes once `agent:message:end` triggers `flush()`.
