@@ -64,7 +64,13 @@ class MacSayProvider {
             const chunkSize = wav.readUInt32LE(offset + 4);
             const chunkStart = offset + 8;
             const chunkEnd = chunkStart + chunkSize;
+            if (chunkEnd > wav.length) {
+                throw new Error("macOS say returned a malformed WAVE data chunk");
+            }
             if (chunkId === "data") {
+                if (chunkSize === 0) {
+                    throw new Error("macOS say returned an empty WAVE data chunk");
+                }
                 return wav.subarray(chunkStart, chunkEnd);
             }
             offset = chunkEnd + (chunkSize % 2);
