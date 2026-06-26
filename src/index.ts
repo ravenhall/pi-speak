@@ -252,8 +252,9 @@ class PiSpeakUi {
   }
 
   clear() {
-    this.setStatus(undefined);
-    this.setWidget(undefined);
+    this.status = undefined;
+    this.widgetLines = undefined;
+    this.ctx = undefined;
   }
 
   private get ui() {

@@ -208,8 +208,9 @@ class PiSpeakUi {
         this.notify("pi-speak: no TTS providers initialized; audio output disabled.", "error");
     }
     clear() {
-        this.setStatus(undefined);
-        this.setWidget(undefined);
+        this.status = undefined;
+        this.widgetLines = undefined;
+        this.ctx = undefined;
     }
     get ui() {
         if (this.ctx?.hasUI === false || !this.ctx?.ui) {
