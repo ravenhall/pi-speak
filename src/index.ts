@@ -41,6 +41,13 @@ interface PiContext {
   ui?: PiUi;
 }
 
+interface PiMessageEvent {
+  message?: {
+    role?: string;
+    content?: unknown;
+  };
+}
+
 class NoopProvider implements TTSProvider {
   async initialize() {}
   streamText(_: string) {}
@@ -432,9 +439,69 @@ export default async function(agent: any) {
     process.kill(process.pid, "SIGTERM");
   });
 
+  let lastAssistantText = "";
+  const streamAssistantMessage = (event: PiMessageEvent) => {
+    const text = getAssistantText(event.message);
+    if (!text) {
+      return;
+    }
+
+    if (!text.startsWith(lastAssistantText)) {
+      lastAssistantText = text;
+      return;
+    }
+
+    const delta = text.slice(lastAssistantText.length);
+    lastAssistantText = text;
+    tts.streamText(delta);
+  };
+
   agent.on("agent:message:delta", (delta: string) => tts.streamText(delta));
-  agent.on("agent:message:end", () => tts.flush());
+  agent.on("agent:message:end", () => {
+    lastAssistantText = "";
+    tts.flush();
+  });
+  agent.on("message_update", (event: PiMessageEvent) => streamAssistantMessage(event));
+  agent.on("message_end", (event: PiMessageEvent) => {
+    streamAssistantMessage(event);
+    lastAssistantText = "";
+    tts.flush();
+  });
   agent.on("user:input", () => stopPlayer());
+}
+
+function getAssistantText(message?: PiMessageEvent["message"]) {
+  if (message?.role !== "assistant") {
+    return "";
+  }
+
+  return extractText(message.content);
+}
+
+function extractText(content: unknown): string {
+  if (typeof content === "string") {
+    return content;
+  }
+
+  if (!Array.isArray(content)) {
+    return "";
+  }
+
+  return content.map(extractContentPartText).join("");
+}
+
+function extractContentPartText(part: unknown): string {
+  if (typeof part === "string") {
+    return part;
+  }
+
+  if (!part || typeof part !== "object") {
+    return "";
+  }
+
+  const record = part as Record<string, unknown>;
+  const text = record.text ?? record.content;
+  return typeof text === "string" ? text : "";
 }
 
 function getProviderOrder(): TTSProviderName[] {

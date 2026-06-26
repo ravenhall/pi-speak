@@ -151,8 +151,24 @@ setTimeout(() => process.exit(0), 100);
 
       (async () => {
         await ext(agent);
-        events["agent:message:delta"]("functional smoke test");
-        events["agent:message:end"]();
+        events.message_update({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "functional" }],
+          },
+        });
+        events.message_update({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "functional smoke test" }],
+          },
+        });
+        events.message_end({
+          message: {
+            role: "assistant",
+            content: [{ type: "text", text: "functional smoke test" }],
+          },
+        });
 
         for (let attempt = 0; attempt < 20 && !hasAudioDisabled(); attempt += 1) {
           await sleep(100);

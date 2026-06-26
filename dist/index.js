@@ -360,9 +360,58 @@ async function default_1(agent) {
         shutdown();
         process.kill(process.pid, "SIGTERM");
     });
+    let lastAssistantText = "";
+    const streamAssistantMessage = (event) => {
+        const text = getAssistantText(event.message);
+        if (!text) {
+            return;
+        }
+        if (!text.startsWith(lastAssistantText)) {
+            lastAssistantText = text;
+            return;
+        }
+        const delta = text.slice(lastAssistantText.length);
+        lastAssistantText = text;
+        tts.streamText(delta);
+    };
     agent.on("agent:message:delta", (delta) => tts.streamText(delta));
-    agent.on("agent:message:end", () => tts.flush());
+    agent.on("agent:message:end", () => {
+        lastAssistantText = "";
+        tts.flush();
+    });
+    agent.on("message_update", (event) => streamAssistantMessage(event));
+    agent.on("message_end", (event) => {
+        streamAssistantMessage(event);
+        lastAssistantText = "";
+        tts.flush();
+    });
     agent.on("user:input", () => stopPlayer());
+}
+function getAssistantText(message) {
+    if (message?.role !== "assistant") {
+        return "";
+    }
+    return extractText(message.content);
+}
+function extractText(content) {
+    if (typeof content === "string") {
+        return content;
+    }
+    if (!Array.isArray(content)) {
+        return "";
+    }
+    return content.map(extractContentPartText).join("");
+}
+function extractContentPartText(part) {
+    if (typeof part === "string") {
+        return part;
+    }
+    if (!part || typeof part !== "object") {
+        return "";
+    }
+    const record = part;
+    const text = record.text ?? record.content;
+    return typeof text === "string" ? text : "";
 }
 function getProviderOrder() {
     const configuredOrder = process.env.TTS_PROVIDER_ORDER ?? process.env.TTS_PROVIDER;
